@@ -29,8 +29,8 @@ After installing Rust, download this repository.
 
 - `input`: Specify the `.las/.laz/.csv/.txt` file. Multiple files can be input separated by spaces.
 - `output`: Specify the output folder. Output `tileset.json` and glb.
-- `input-epsg`: Input the epsg code of the las file. All point clouds are recognized as being in the same coordinate system.(Currently, only the Japanese plane rectangular coordinate system is supported.)
-- `output-epsg`: Supports conversion to WGS84 Geographic 3D (EPSG:4979), which is the standard for Cesium, and JGD2011 Geographic 3D (EPSG:6697), which is frequently used in Japan.
+- `input-epsg`: Input the EPSG code of the las file. All point clouds are recognized as being in the same coordinate system. Supports any EPSG code via PROJ library.
+- `output-epsg`: Supports conversion to any EPSG code. Common options include WGS84 Geographic 3D (EPSG:4979), which is the standard for Cesium, and JGD2011 Geographic 3D (EPSG:6697), which is frequently used in Japan.
 - `min`: Specify the minimum zoom level you want to output.
 - `max`: Specify the maximum zoom level you want to output.
 - `max-memory-mb`: Specify the number of MB of memory available for conversion.
@@ -81,7 +81,7 @@ For example, the following data is valid.
 - [X] generation of gzip-compressed tiles
 - [ ] assignment of attributes using EXT_mesh_features
 - [ ] compression using meshopt
-- [ ] increasing the number of supported coordinate systems
+- [X] support for all EPSG coordinate systems (via PROJ library)
 
 ## License
 
