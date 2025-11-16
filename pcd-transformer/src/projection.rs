@@ -1,50 +1,62 @@
 use pcd_core::pointcloud::point::Point;
-use projection_transform::{crs::*, jprect::JPRZone, vshift::Jgd2011ToWgs84};
+use projection_transform::{
+    crs::*, jprect::JPRZone, proj_transform::ProjTransform, vshift::Jgd2011ToWgs84,
+};
+use std::sync::Mutex;
+use std::collections::HashMap;
 
+// Thread-local cache for PROJ transformers to avoid recreating them
+thread_local! {
+    static PROJ_CACHE: Mutex<HashMap<(EpsgCode, EpsgCode), ProjTransform>> = Mutex::new(HashMap::new());
+}
+
+/// Transform a single point from input CRS to output CRS
+///
+/// This function automatically selects the best transformation strategy:
+/// - For Japan-specific transformations: Uses optimized JGD2011 -> WGS84 path
+/// - For all other transformations: Uses PROJ library
 pub fn transform_point(
     point: Point,
     input_epsg: EpsgCode,
     output_epsg: EpsgCode,
     jgd2wgs: &Jgd2011ToWgs84,
 ) -> Point {
-    match input_epsg {
-        EPSG_JGD2011_JPRECT_I
-        | EPSG_JGD2011_JPRECT_II
-        | EPSG_JGD2011_JPRECT_III
-        | EPSG_JGD2011_JPRECT_IV
-        | EPSG_JGD2011_JPRECT_V
-        | EPSG_JGD2011_JPRECT_VI
-        | EPSG_JGD2011_JPRECT_VII
-        | EPSG_JGD2011_JPRECT_VIII
-        | EPSG_JGD2011_JPRECT_IX
-        | EPSG_JGD2011_JPRECT_X
-        | EPSG_JGD2011_JPRECT_XI
-        | EPSG_JGD2011_JPRECT_XII
-        | EPSG_JGD2011_JPRECT_XIII
-        | EPSG_JGD2011_JPRECT_XIV
-        | EPSG_JGD2011_JPRECT_XV
-        | EPSG_JGD2011_JPRECT_XVI
-        | EPSG_JGD2011_JPRECT_XVII
-        | EPSG_JGD2011_JPRECT_XVIII
-        | EPSG_JGD2011_JPRECT_XIX
-        | EPSG_JGD2011_JPRECT_I_JGD2011_HEIGHT
-        | EPSG_JGD2011_JPRECT_II_JGD2011_HEIGHT
-        | EPSG_JGD2011_JPRECT_III_JGD2011_HEIGHT
-        | EPSG_JGD2011_JPRECT_IV_JGD2011_HEIGHT
-        | EPSG_JGD2011_JPRECT_V_JGD2011_HEIGHT
-        | EPSG_JGD2011_JPRECT_VI_JGD2011_HEIGHT
-        | EPSG_JGD2011_JPRECT_VII_JGD2011_HEIGHT
-        | EPSG_JGD2011_JPRECT_VIII_JGD2011_HEIGHT
-        | EPSG_JGD2011_JPRECT_IX_JGD2011_HEIGHT
-        | EPSG_JGD2011_JPRECT_X_JGD2011_HEIGHT
-        | EPSG_JGD2011_JPRECT_XI_JGD2011_HEIGHT
-        | EPSG_JGD2011_JPRECT_XII_JGD2011_HEIGHT
-        | EPSG_JGD2011_JPRECT_XIII_JGD2011_HEIGHT => {
-            transform_from_jgd2011(point, Some(input_epsg), Some(output_epsg), jgd2wgs)
-        }
-        _ => {
-            panic!("Unsupported input CRS: {}", input_epsg);
-        }
+    // Check if this is a Japan-specific transformation that can use optimized path
+    if is_japan_crs(input_epsg) && output_epsg == EPSG_WGS84_GEOGRAPHIC_3D {
+        transform_from_jgd2011(point, Some(input_epsg), Some(output_epsg), jgd2wgs)
+    } else {
+        // Use PROJ for all other transformations
+        transform_with_proj(point, input_epsg, output_epsg)
+    }
+}
+
+/// Transform point using PROJ library
+fn transform_with_proj(point: Point, input_epsg: EpsgCode, output_epsg: EpsgCode) -> Point {
+    // Get or create transformer from cache
+    let (x, y, z) = PROJ_CACHE.with(|cache| {
+        let mut cache = cache.lock().unwrap();
+
+        let transformer = cache
+            .entry((input_epsg, output_epsg))
+            .or_insert_with(|| {
+                ProjTransform::new(input_epsg, output_epsg)
+                    .unwrap_or_else(|e| panic!(
+                        "Failed to create PROJ transformer from EPSG:{} to EPSG:{}: {}",
+                        input_epsg, output_epsg, e
+                    ))
+            });
+
+        transformer
+            .transform(point.x, point.y, point.z)
+            .expect("PROJ transformation failed")
+    });
+
+    Point {
+        x,
+        y,
+        z,
+        color: point.color,
+        attributes: point.attributes,
     }
 }
 
