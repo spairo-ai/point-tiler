@@ -20,7 +20,7 @@ pub fn transform_point(
     input_epsg: EpsgCode,
     output_epsg: EpsgCode,
     jgd2wgs: &Jgd2011ToWgs84,
-) -> Point {
+) -> crate::error::Result<Point> {
     // Check if this is a Japan-specific transformation that can use optimized path
     if is_japan_crs(input_epsg) && output_epsg == EPSG_WGS84_GEOGRAPHIC_3D {
         transform_from_jgd2011(point, Some(input_epsg), Some(output_epsg), jgd2wgs)
@@ -31,33 +31,37 @@ pub fn transform_point(
 }
 
 /// Transform point using PROJ library
-fn transform_with_proj(point: Point, input_epsg: EpsgCode, output_epsg: EpsgCode) -> Point {
+fn transform_with_proj(point: Point, input_epsg: EpsgCode, output_epsg: EpsgCode) -> crate::error::Result<Point> {
     // Get or create transformer from cache
-    let (x, y, z) = PROJ_CACHE.with(|cache| {
+    let (x, y, z) = PROJ_CACHE.with(|cache| -> crate::error::Result<(f64, f64, f64)> {
         let mut cache = cache.lock().unwrap();
 
-        let transformer = cache
-            .entry((input_epsg, output_epsg))
-            .or_insert_with(|| {
-                ProjTransform::new(input_epsg, output_epsg)
-                    .unwrap_or_else(|e| panic!(
-                        "Failed to create PROJ transformer from EPSG:{} to EPSG:{}: {}",
-                        input_epsg, output_epsg, e
-                    ))
-            });
+        // Check if transformer exists in cache
+        if !cache.contains_key(&(input_epsg, output_epsg)) {
+            let transformer = ProjTransform::new(input_epsg, output_epsg)
+                .map_err(|e| crate::error::TransformError::ProjTransformCreationFailed {
+                    from: input_epsg,
+                    to: output_epsg,
+                    reason: e.to_string(),
+                })?;
+            cache.insert((input_epsg, output_epsg), transformer);
+        }
 
+        let transformer = cache.get(&(input_epsg, output_epsg)).unwrap();
         transformer
             .transform(point.x, point.y, point.z)
-            .expect("PROJ transformation failed")
-    });
+            .map_err(|e| crate::error::TransformError::ProjTransformFailed {
+                reason: format!("Failed to transform from EPSG:{} to EPSG:{}: {}", input_epsg, output_epsg, e),
+            })
+    })?;
 
-    Point {
+    Ok(Point {
         x,
         y,
         z,
         color: point.color,
         attributes: point.attributes,
-    }
+    })
 }
 
 fn rectangular_to_lnglat(x: f64, y: f64, height: f64, input_epsg: EpsgCode) -> (f64, f64, f64) {
@@ -72,8 +76,12 @@ fn transform_from_jgd2011(
     rectangular: Option<EpsgCode>,
     output_epsg: Option<EpsgCode>,
     jgd2wgs: &Jgd2011ToWgs84,
-) -> Point {
-    match output_epsg.unwrap() {
+) -> crate::error::Result<Point> {
+    let output_epsg = output_epsg.ok_or_else(|| crate::error::TransformError::TransformationFailed {
+        reason: "Output EPSG code is required".to_string(),
+    })?;
+
+    match output_epsg {
         EPSG_WGS84_GEOGRAPHIC_3D => {
             let x = point.x;
             let y = point.y;
@@ -87,13 +95,13 @@ fn transform_from_jgd2011(
 
             let (lng, lat, height) = jgd2wgs.convert(lng, lat, height);
 
-            Point {
+            Ok(Point {
                 x: lng,
                 y: lat,
                 z: height,
                 color: point.color.clone(),
                 attributes: point.attributes.clone(),
-            }
+            })
         }
         EPSG_JGD2011_GEOGRAPHIC_3D => {
             let x = point.x;
@@ -106,16 +114,16 @@ fn transform_from_jgd2011(
                 (x, y, z)
             };
 
-            Point {
+            Ok(Point {
                 x: lng,
                 y: lat,
                 z: height,
                 color: point.color.clone(),
                 attributes: point.attributes.clone(),
-            }
+            })
         }
         _ => {
-            panic!("Unsupported output CRS: {:?}", output_epsg);
+            Err(crate::error::TransformError::UnsupportedOutputCrs { epsg: output_epsg })
         }
     }
 }

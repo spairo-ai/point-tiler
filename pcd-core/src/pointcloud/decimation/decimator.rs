@@ -23,8 +23,9 @@ impl PointCloudDecimator for VoxelDecimator {
         let mut decimated_points = Vec::new();
         for (index, cell_points) in cells {
             let voxel_center = self.get_voxel_center(index, voxel_size);
-            let closest_point = self.select_closest_point(cell_points, voxel_center);
-            decimated_points.push(closest_point.clone());
+            if let Some(closest_point) = self.select_closest_point(cell_points, voxel_center) {
+                decimated_points.push(closest_point.clone());
+            }
         }
 
         decimated_points
@@ -52,7 +53,7 @@ impl VoxelDecimator {
         &self,
         points: Vec<&'a Point>,
         voxel_center: (f64, f64, f64),
-    ) -> &'a Point {
+    ) -> Option<&'a Point> {
         points
             .into_iter()
             .min_by(|a, b| {
@@ -62,7 +63,6 @@ impl VoxelDecimator {
                     .partial_cmp(&dist_b)
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
-            .unwrap()
     }
 
     fn squared_distance(&self, a: &Point, b: (f64, f64, f64)) -> f64 {

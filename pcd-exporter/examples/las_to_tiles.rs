@@ -80,7 +80,7 @@ fn main() {
         println!("  transformed first point: {:?}", transformed.points[0]);
         println!("  offset: {:?}", transformed.metadata.offset);
 
-        let geometric_error = geometric_error(tile_coords.0, tile_coords.2);
+        let geometric_error = geometric_error(tile_coords.0, tile_coords.2).unwrap_or(1e+100);
         println!("  Geometric error: {}", geometric_error);
 
         let voxel_size = geometric_error * 0.1;

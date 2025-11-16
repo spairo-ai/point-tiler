@@ -123,13 +123,13 @@ impl PointCloud {
 
         let scale_x: f64 = format!("{:.*}", max_digits, 0.1_f64.powi(max_digits as i32))
             .parse()
-            .unwrap();
+            .unwrap_or(0.1_f64.powi(max_digits as i32));
         let scale_y: f64 = format!("{:.*}", max_digits, 0.1_f64.powi(max_digits as i32))
             .parse()
-            .unwrap();
+            .unwrap_or(0.1_f64.powi(max_digits as i32));
         let scale_z: f64 = format!("{:.*}", max_digits, 0.1_f64.powi(max_digits as i32))
             .parse()
-            .unwrap();
+            .unwrap_or(0.1_f64.powi(max_digits as i32));
 
         let min_x = bounding_volume.min[0];
         let min_y = bounding_volume.min[1];

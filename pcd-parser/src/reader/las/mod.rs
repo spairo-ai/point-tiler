@@ -27,8 +27,9 @@ impl LasPointReader {
     pub fn open_next_file(&mut self) -> io::Result<()> {
         if self.current_file_index < self.files.len() {
             let path = &self.files[self.current_file_index];
-            let file = File::open(path).unwrap();
-            let reader = Reader::new(BufReader::new(file)).unwrap();
+            let file = File::open(path)?;
+            let reader = Reader::new(BufReader::new(file))
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
             self.current_reader = Some(reader);
             self.current_file_index += 1;
             Ok(())
@@ -83,7 +84,11 @@ impl PointReader for LasPointReader {
                 }
             }
 
-            let reader = self.current_reader.as_mut().unwrap();
+            let reader = match self.current_reader.as_mut() {
+                Some(r) => r,
+                None => return Ok(None), // Should not happen, but handle safely
+            };
+
             match reader.points().next() {
                 Some(Ok(las_point)) => {
                     let p = Self::convert_las_point(las_point);

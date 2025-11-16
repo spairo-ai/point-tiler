@@ -1073,6 +1073,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "thiserror 2.0.12",
  "tinymvt",
 ]
 
@@ -1085,6 +1086,7 @@ dependencies = [
  "pcd-core",
  "projection-transform",
  "rayon",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -1096,6 +1098,7 @@ dependencies = [
  "pcd-parser",
  "projection-transform",
  "rayon",
+ "thiserror 2.0.12",
 ]
 
 [[package]]

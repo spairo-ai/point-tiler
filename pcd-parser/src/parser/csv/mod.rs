@@ -30,22 +30,20 @@ impl Parser for CsvParser {
     fn parse(&self) -> Result<PointCloud, Box<dyn Error>> {
         let mut reader = ReaderBuilder::new()
             .has_headers(true)
-            .from_path(&self.filenames[0])
-            .unwrap();
+            .from_path(&self.filenames[0])?;
 
-        let headers = reader.headers().unwrap();
+        let headers = reader.headers()?;
         let has_headers = !headers.iter().all(|h| h.trim().is_empty());
 
-        let field_mapping = create_field_mapping(headers, has_headers).unwrap();
+        let field_mapping = create_field_mapping(headers, has_headers)?;
 
         let mut reader = ReaderBuilder::new()
             .has_headers(true)
-            .from_path(&self.filenames[0])
-            .unwrap();
+            .from_path(&self.filenames[0])?;
         let mut points = Vec::new();
         {
             for record in reader.records() {
-                let record: csv::StringRecord = record.unwrap();
+                let record: csv::StringRecord = record?;
 
                 let x_str =
                     get_field_value(&record, &field_mapping, "x").ok_or("Missing 'x' field")?;

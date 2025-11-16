@@ -136,7 +136,7 @@ impl Tile {
 
         let (z, _, y) = self.zxy;
         tileset::Tile {
-            geometric_error: geometric_error(z, y),
+            geometric_error: geometric_error(z, y).unwrap_or(1e+100),
             refine: Some(tileset::Refine::Replace),
             bounding_volume: tileset::BoundingVolume::new_region([
                 self.min_lng.to_radians(),
@@ -192,7 +192,8 @@ impl TileTree {
         if zoom == 0 {
             &mut self.root
         } else {
-            let parent = self.get_node(calc_parent_zxy(zoom, x, y));
+            let parent_zxy = calc_parent_zxy(zoom, x, y).expect("Cannot get parent of root tile");
+            let parent = self.get_node(parent_zxy);
             let node = match (x % 2, y % 2) {
                 (0, 0) => parent.child00.get_or_insert_with(|| Tile::new(zxy).into()),
                 (0, 1) => parent.child01.get_or_insert_with(|| Tile::new(zxy).into()),

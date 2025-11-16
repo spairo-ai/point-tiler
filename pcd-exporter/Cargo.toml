@@ -15,6 +15,7 @@ tinymvt = "0.0.1"
 projection-transform = { path = "../projection-transform" }
 rayon = "1.10.0"
 meshopt = "0.3"
+thiserror = "2.0"
 
 [dev-dependencies]
 pcd-parser = { path = "../pcd-parser" }

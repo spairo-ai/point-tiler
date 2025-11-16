@@ -31,9 +31,11 @@ impl Parser for LasParser {
         let mut points = Vec::new();
 
         for f in self.filenames.iter() {
-            let mut reader = Reader::from_path(f.to_str().unwrap()).unwrap();
+            let path_str = f.to_str()
+                .ok_or_else(|| format!("Invalid path: {:?}", f))?;
+            let mut reader = Reader::from_path(path_str)?;
             for las_point in reader.points() {
-                let las_point = las_point.unwrap();
+                let las_point = las_point?;
 
                 let color = las_point.color.map(|c| Color {
                     r: c.red,

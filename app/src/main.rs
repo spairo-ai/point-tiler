@@ -104,7 +104,7 @@ fn check_and_get_extension(paths: &[PathBuf]) -> Result<Extension, String> {
         return Err("Multiple extensions are not supported".to_string());
     }
 
-    Ok(get_extension(extensions[0]))
+    get_extension(extensions[0]).map_err(|e| e.to_string())
 }
 
 fn expand_globs(input_patterns: Vec<String>) -> Vec<PathBuf> {
@@ -398,7 +398,7 @@ fn export_tiles_to_glb(
                 .collect();
 
             let transformed_pc = PointCloud::new(transformed_points, epsg);
-            let geometric_error_value = geometric_error(tz, ty);
+            let geometric_error_value = geometric_error(tz, ty).unwrap_or(1e+100);
             let voxel_size = geometric_error_value * 0.1;
             let decimator = VoxelDecimator { voxel_size };
             let decimated_points = decimator.decimate(&transformed_pc.points);
@@ -662,7 +662,15 @@ fn in_memory_workflow(
     // Transform all points first
     let transformed_points: Vec<Point> = all_points
         .par_iter()
-        .map(|p| transform_point(p.clone(), epsg_in, epsg_out, &jgd2wgs))
+        .filter_map(|p| {
+            match transform_point(p.clone(), epsg_in, epsg_out, &jgd2wgs) {
+                Ok(transformed) => Some(transformed),
+                Err(e) => {
+                    eprintln!("Warning: Failed to transform point: {}", e);
+                    None
+                }
+            }
+        })
         .collect();
 
     if args.tiling_mode == "octree" {
@@ -919,13 +927,20 @@ fn external_sort_workflow(
                 };
 
                 while let Ok(Some(p)) = reader.next_point() {
-                    let transformed = transform_point(p, epsg_in, epsg_out, &jgd2wgs_clone);
-                    buffer.push(transformed);
-                    if buffer.len() >= default_chunk_points_len {
-                        if tx.send(buffer.clone()).is_err() {
-                            break;
+                    match transform_point(p, epsg_in, epsg_out, &jgd2wgs_clone) {
+                        Ok(transformed) => {
+                            buffer.push(transformed);
+                            if buffer.len() >= default_chunk_points_len {
+                                if tx.send(buffer.clone()).is_err() {
+                                    break;
+                                }
+                                buffer = Vec::with_capacity(default_chunk_points_len);
+                            }
                         }
-                        buffer = Vec::with_capacity(default_chunk_points_len);
+                        Err(e) => {
+                            eprintln!("Warning: Failed to transform point: {}", e);
+                            // Skip this point and continue
+                        }
                     }
                 }
                 if !buffer.is_empty() {

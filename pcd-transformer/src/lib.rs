@@ -1,4 +1,5 @@
 pub mod builder;
+pub mod error;
 pub mod projection;
 pub mod runner;
 pub mod transform;

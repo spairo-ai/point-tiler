@@ -21,12 +21,14 @@ pub enum Extension {
     Txt,
 }
 
-pub fn get_extension(extension: &str) -> Extension {
+pub fn get_extension(extension: &str) -> crate::error::Result<Extension> {
     match extension {
-        "las" => Extension::Las,
-        "laz" => Extension::Laz,
-        "csv" => Extension::Csv,
-        "txt" => Extension::Txt,
-        _ => panic!("Unsupported extension"),
+        "las" => Ok(Extension::Las),
+        "laz" => Ok(Extension::Laz),
+        "csv" => Ok(Extension::Csv),
+        "txt" => Ok(Extension::Txt),
+        _ => Err(crate::error::ParseError::UnsupportedExtension {
+            extension: extension.to_string(),
+        }),
     }
 }

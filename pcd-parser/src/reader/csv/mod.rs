@@ -220,7 +220,10 @@ impl PointReader for CsvPointReader {
                 }
             }
 
-            let reader = self.current_reader.as_mut().unwrap();
+            let reader = match self.current_reader.as_mut() {
+                Some(r) => r,
+                None => return Ok(None), // Should not happen, but handle safely
+            };
             let mut record = csv::StringRecord::new();
 
             match reader.read_record(&mut record) {
