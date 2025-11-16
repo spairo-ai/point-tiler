@@ -119,6 +119,7 @@ dependencies = [
  "itertools 0.13.0",
  "kv-extsort",
  "log",
+ "meshopt",
  "num_cpus",
  "pcd-core",
  "pcd-exporter",
@@ -565,6 +566,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "float-cmp"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98de4bbd547a563b716d8dfa9aad1cb19bfab00f4fa09a6a4ed21dbcf44ce9c4"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "flume"
 version = "0.10.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -955,6 +965,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 
 [[package]]
+name = "meshopt"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0cad96c96b1c198160517f5dc7c247ef36ebb9d49015c0cfca0c0ee8d7d1bbc"
+dependencies = [
+ "bitflags",
+ "cc",
+ "float-cmp",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1043,6 +1065,7 @@ dependencies = [
  "cesiumtiles",
  "cesiumtiles-gltf",
  "cesiumtiles-gltf-json",
+ "meshopt",
  "pcd-core",
  "pcd-parser",
  "pcd-transformer",
