@@ -36,6 +36,7 @@ After installing Rust, download this repository.
 - `max-memory-mb`: Specify the number of MB of memory available for conversion.
 - `quantize`: Perform quantization.
 - `--gzip-compress`: The output 3D Tiles are compressed using gzip. The file extension dose not change.
+- `--tiling-mode`: Choose the tiling scheme: `geographic` (default, 2D lat/lon grid) or `octree` (3D spatial partitioning).
 
 In the repository root, the following commands can be executed.
 
@@ -54,6 +55,35 @@ point_tiler --input app/examples/data/sample.las \
 This tool has a unique concept called a `zoom level` which represents a planar area roughly the same size as 2D tiles such as raster tiles or Google Photorealistic 3D Tiles.
 The geometric error varies depending on the zoom level for example, it is approximately 64.0 at zoom level 15, about 8.0 at zoom level 18, and about 1.0 at zoom level 21.
 The output tiles are thinned out so that one point is stored in a voxel grid of `Geometric Error × 0.1`.
+
+### Tiling Modes
+
+Point Tiler now supports two tiling schemes:
+
+#### Geographic Tiling (Default)
+- Uses a 2D latitude/longitude grid similar to web map tiles
+- Compatible with Google Photorealistic 3D Tiles
+- Best for datasets covering large geographic areas
+- Zoom levels represent planar area (e.g., level 15 ≈ 64m error, level 18 ≈ 8m error)
+
+#### Octree Tiling
+- Uses 3D spatial partitioning (octree structure)
+- Recursively subdivides space into 8 octants
+- Better spatial locality for 3D point clouds
+- More uniform point distribution across nodes
+- Ideal for airborne LiDAR with significant elevation variation
+- Depth levels work similarly to zoom levels
+
+To use octree tiling:
+```sh
+point_tiler --input sample.las \
+    --output output/ \
+    --input-epsg 6677 \
+    --output-epsg 4979 \
+    --min 3 \
+    --max 8 \
+    --tiling-mode octree
+```
 
 ### CSV/TXT
 

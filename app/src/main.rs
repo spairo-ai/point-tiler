@@ -41,7 +41,7 @@ use pcd_exporter::tiling;
 use pcd_exporter::{
     cesiumtiles::make_tile_content,
     gltf::generate_quantized_glb,
-    tiling::{geometric_error, TileContent, TileTree},
+    tiling::{geometric_error, TileContent, TileTree, BoundingBox, OctreeNodeId, OctantIndex, OctreeContent, OctreeTree, get_node_bbox, octree_geometric_error},
 };
 use pcd_parser::parser::{get_extension, Extension};
 use projection_transform::cartesian::geodetic_to_geocentric;
@@ -80,6 +80,9 @@ struct Cli {
 
     #[arg(long)]
     gzip_compress: bool,
+
+    #[arg(long, default_value = "geographic")]
+    tiling_mode: String,
 }
 
 fn check_and_get_extension(paths: &[PathBuf]) -> Result<Extension, String> {
@@ -218,6 +221,137 @@ fn aggregate_zoom_level(base_path: &Path, z: u8) -> std::io::Result<()> {
     Ok(())
 }
 
+// Octree-specific helper functions
+
+/// Calculate bounding box from points
+fn calculate_bounding_box(points: &[Point]) -> BoundingBox {
+    let mut bbox = BoundingBox::new(
+        f64::MAX,
+        f64::MAX,
+        f64::MAX,
+        f64::MIN,
+        f64::MIN,
+        f64::MIN,
+    );
+
+    for p in points {
+        bbox.expand_to_include(p.x, p.y, p.z);
+    }
+
+    bbox
+}
+
+/// Assign a point to an octree node at a given depth
+fn assign_point_to_octree_node(
+    point: &Point,
+    root_bbox: &BoundingBox,
+    max_depth: u8,
+) -> OctreeNodeId {
+    let mut current_bbox = *root_bbox;
+    let mut path = Vec::new();
+
+    for _ in 0..max_depth {
+        let octant = OctantIndex::from_point(&current_bbox, point.x, point.y, point.z);
+        path.push(octant.value());
+
+        let octants = pcd_exporter::tiling::subdivide_bbox(&current_bbox);
+        current_bbox = octants[octant.value() as usize];
+    }
+
+    OctreeNodeId::new(max_depth, &path)
+}
+
+/// Write points to octree node file
+fn write_points_to_octree_node(
+    dir_path: &Path,
+    node_id: OctreeNodeId,
+    points: &[Point],
+) -> std::io::Result<()> {
+    let (depth, morton) = node_id.to_tuple();
+    let node_path = dir_path.join(format!("octree/{}/{:016x}.bin", depth, morton));
+
+    fs::create_dir_all(node_path.parent().unwrap())?;
+
+    let file = File::create(node_path)?;
+    let mut writer = BufWriter::new(file);
+
+    let encoded = bitcode::encode(points);
+    writer.write_all(&encoded)?;
+
+    Ok(())
+}
+
+/// Read points from octree node file
+fn read_points_from_octree_node(file_path: &Path) -> std::io::Result<Vec<Point>> {
+    let file = File::open(file_path)?;
+    let mut buf_reader = file;
+    let mut buffer = Vec::new();
+    buf_reader.read_to_end(&mut buffer).unwrap();
+    let points = bitcode::decode(&buffer).unwrap();
+    Ok(points)
+}
+
+/// Extract octree node coordinates from file path
+fn extract_octree_node_id(file_path: &Path) -> OctreeNodeId {
+    let depth_dir = file_path.parent().unwrap();
+
+    let depth: u8 = depth_dir
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    let morton_str = file_path
+        .file_stem()
+        .unwrap()
+        .to_str()
+        .unwrap();
+
+    let morton = u64::from_str_radix(morton_str, 16).unwrap();
+
+    OctreeNodeId((depth as u64) << 60 | morton)
+}
+
+/// Get list of octree node files for a given depth
+fn get_octree_node_list_for_depth(base_path: &Path, depth: u8) -> Vec<PathBuf> {
+    let pattern = base_path.join(format!("octree/{}/*.bin", depth));
+    let mut files = Vec::new();
+    files.extend(
+        glob::glob(pattern.to_str().unwrap())
+            .unwrap()
+            .filter_map(Result::ok),
+    );
+    files
+}
+
+/// Aggregate octree nodes from child depth to parent depth
+fn aggregate_octree_depth(base_path: &Path, target_depth: u8) -> std::io::Result<()> {
+    let child_depth = target_depth + 1;
+    let child_files = get_octree_node_list_for_depth(base_path, child_depth);
+
+    let mut parent_map: HashMap<OctreeNodeId, Vec<Point>> = HashMap::new();
+
+    for child_file in child_files {
+        let child_id = extract_octree_node_id(&child_file);
+        let points = read_points_from_octree_node(&child_file)?;
+
+        if let Some(parent_id) = child_id.parent() {
+            parent_map.entry(parent_id).or_default().extend(points);
+        }
+    }
+
+    parent_map
+        .into_par_iter()
+        .try_for_each(|(parent_id, pts)| -> std::io::Result<()> {
+            write_points_to_octree_node(base_path, parent_id, &pts)?;
+            Ok(())
+        })?;
+
+    Ok(())
+}
+
 fn export_tiles_to_glb(
     base_path: &Path,
     output_path: &Path,
@@ -291,6 +425,98 @@ fn export_tiles_to_glb(
         .collect();
 
     Ok(tile_contents)
+}
+
+/// Export octree nodes to GLB format
+fn export_octree_nodes_to_glb(
+    base_path: &Path,
+    output_path: &Path,
+    root_bbox: &BoundingBox,
+    min_depth: u8,
+    max_depth: u8,
+    quantize: bool,
+    gzip_compress: bool,
+) -> std::io::Result<Vec<OctreeContent>> {
+    let mut all_nodes = Vec::new();
+    for depth in min_depth..=max_depth {
+        let files = get_octree_node_list_for_depth(base_path, depth);
+        all_nodes.extend(files);
+    }
+
+    let octree_contents: Vec<OctreeContent> = all_nodes
+        .par_iter()
+        .map(|node_file| {
+            let node_id = extract_octree_node_id(node_file);
+            let points = read_points_from_octree_node(node_file).unwrap();
+            let epsg = 4979;
+            let pc = PointCloud::new(points.clone(), epsg);
+
+            // Calculate bounding box for this node
+            let node_bbox = get_node_bbox(root_bbox, node_id);
+
+            // Create content path
+            let (depth, morton) = node_id.to_tuple();
+            let content_path = format!("octree/{}/{:016x}.glb", depth, morton);
+
+            // Transform to geocentric coordinates
+            let ellipsoid = projection_transform::ellipsoid::wgs84();
+            let transformed_points: Vec<Point> = pc
+                .points
+                .par_iter()
+                .map(|orig| {
+                    let (lng, lat, height) = (orig.x, orig.y, orig.z);
+                    let (xx, yy, zz) = geodetic_to_geocentric(&ellipsoid, lng, lat, height);
+                    Point {
+                        x: xx,
+                        y: zz,
+                        z: -yy,
+                        color: orig.color.clone(),
+                        attributes: orig.attributes.clone(),
+                    }
+                })
+                .collect();
+
+            let transformed_pc = PointCloud::new(transformed_points, epsg);
+
+            // Decimate points based on geometric error
+            let geometric_error_value = octree_geometric_error(&node_bbox);
+            let voxel_size = geometric_error_value * 0.1;
+            let decimator = VoxelDecimator { voxel_size };
+            let decimated_points = decimator.decimate(&transformed_pc.points);
+            let decimated = PointCloud::new(decimated_points, epsg);
+
+            // Write GLB file
+            let glb_path = output_path.join(&content_path);
+            fs::create_dir_all(glb_path.parent().unwrap()).unwrap();
+
+            let glb = if quantize {
+                generate_quantized_glb(decimated).unwrap()
+            } else {
+                generate_glb(decimated).unwrap()
+            };
+
+            if gzip_compress {
+                let file = File::create(glb_path).unwrap();
+                let writer = BufWriter::new(file);
+                glb.to_writer_with_alignment(writer, 8).unwrap();
+            } else {
+                let file = File::create(glb_path).unwrap();
+                let writer = BufWriter::new(file);
+                glb.to_writer_with_alignment(writer, 8).unwrap();
+            }
+
+            // Calculate actual bounding box from points
+            let actual_bbox = calculate_bounding_box(&points);
+
+            OctreeContent {
+                node_id,
+                content_path,
+                bbox: actual_bbox,
+            }
+        })
+        .collect();
+
+    Ok(octree_contents)
 }
 
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Pod, Zeroable, Encode, Decode)]
@@ -415,100 +641,201 @@ fn in_memory_workflow(
     let start_local = std::time::Instant::now();
     let epsg_in = args.input_epsg;
     let epsg_out = args.output_epsg;
-    let max_zoom = args.max;
 
-    let jgd2wgs_clone = Arc::clone(&jgd2wgs);
-    let map_init = || HashMap::<u64, Vec<Point>>::new();
-    let map_fold = move |mut map: HashMap<u64, Vec<Point>>, p: &Point| {
-        let transformed = transform_point(p.clone(), epsg_in, epsg_out, &jgd2wgs_clone);
-        let (z, x, y) = tiling::scheme::zxy_from_lng_lat(max_zoom, transformed.x, transformed.y);
-        let tile_id = TileIdMethod::Hilbert.zxy_to_id(z, x, y);
-        map.entry(tile_id).or_default().push(transformed);
-        map
-    };
-    let map_reduce = |mut a: HashMap<u64, Vec<Point>>, b: HashMap<u64, Vec<Point>>| {
-        for (k, mut v) in b {
-            a.entry(k).or_default().append(&mut v);
-        }
-        a
-    };
-
-    let tile_map = all_points
+    // Transform all points first
+    let transformed_points: Vec<Point> = all_points
         .par_iter()
-        .fold(map_init, map_fold)
-        .reduce(map_init, map_reduce);
+        .map(|p| transform_point(p.clone(), epsg_in, epsg_out, &jgd2wgs))
+        .collect();
 
-    log::info!(
-        "Transformed & grouped into {} tiles in {:?}",
-        tile_map.len(),
-        start_local.elapsed()
-    );
+    if args.tiling_mode == "octree" {
+        log::info!("Using octree tiling mode");
 
-    let tmp_tiled_file_dir_path = tempdir().unwrap();
+        // Calculate bounding box from transformed points
+        let root_bbox = calculate_bounding_box(&transformed_points);
+        log::info!("Root bounding box: {:?}", root_bbox);
 
-    log::info!("start writing tile files...");
-    let start_local = std::time::Instant::now();
-    tile_map
-        .into_par_iter()
-        .try_for_each(|(tile_id, points)| -> std::io::Result<()> {
-            let (z, x, y) = TileIdMethod::Hilbert.id_to_zxy(tile_id);
+        let max_depth = args.max;
+        let min_depth = args.min;
 
-            let tile_path = tmp_tiled_file_dir_path
-                .path()
-                .join(format!("{}/{}/{}.bin", z, x, y));
-            fs::create_dir_all(tile_path.parent().unwrap())?;
-            let file = File::create(tile_path)?;
-            let mut writer = BufWriter::new(file);
-            let encoded = bitcode::encode(&points);
-            writer.write_all(&encoded)?;
-            Ok(())
-        })?;
+        // Group points by octree node
+        let map_init = || HashMap::<OctreeNodeId, Vec<Point>>::new();
+        let root_bbox_clone = root_bbox;
+        let map_fold = move |mut map: HashMap<OctreeNodeId, Vec<Point>>, p: &Point| {
+            let node_id = assign_point_to_octree_node(p, &root_bbox_clone, max_depth);
+            map.entry(node_id).or_default().push(p.clone());
+            map
+        };
+        let map_reduce = |mut a: HashMap<OctreeNodeId, Vec<Point>>, b: HashMap<OctreeNodeId, Vec<Point>>| {
+            for (k, mut v) in b {
+                a.entry(k).or_default().append(&mut v);
+            }
+            a
+        };
 
-    log::info!("Wrote tile files in {:?}", start_local.elapsed());
+        let node_map = transformed_points
+            .par_iter()
+            .fold(map_init, map_fold)
+            .reduce(map_init, map_reduce);
 
-    log::info!("start zoom aggregation...");
-    let start_local = std::time::Instant::now();
-    for z in (args.min..max_zoom).rev() {
-        log::info!("aggregating zoom level: {}", z);
-        aggregate_zoom_level(tmp_tiled_file_dir_path.path(), z)?;
-    }
-    log::info!("Finish zoom aggregation in {:?}", start_local.elapsed());
+        log::info!(
+            "Transformed & grouped into {} octree nodes in {:?}",
+            node_map.len(),
+            start_local.elapsed()
+        );
 
-    log::info!("start exporting tiles (GLB)...");
-    let start_local = std::time::Instant::now();
+        let tmp_tiled_file_dir_path = tempdir().unwrap();
 
-    let tile_contents = export_tiles_to_glb(
-        tmp_tiled_file_dir_path.path(),
-        output_path,
-        args.min,
-        max_zoom,
-        args.quantize,
-        args.gzip_compress,
-    )?;
+        log::info!("start writing octree node files...");
+        let start_local = std::time::Instant::now();
+        node_map
+            .into_par_iter()
+            .try_for_each(|(node_id, points)| -> std::io::Result<()> {
+                write_points_to_octree_node(tmp_tiled_file_dir_path.path(), node_id, &points)?;
+                Ok(())
+            })?;
 
-    log::info!("Finish exporting tiles in {:?}", start_local.elapsed());
+        log::info!("Wrote octree node files in {:?}", start_local.elapsed());
 
-    drop(tmp_tiled_file_dir_path);
+        log::info!("start depth aggregation...");
+        let start_local = std::time::Instant::now();
+        for depth in (min_depth..max_depth).rev() {
+            log::info!("aggregating depth level: {}", depth);
+            aggregate_octree_depth(tmp_tiled_file_dir_path.path(), depth)?;
+        }
+        log::info!("Finish depth aggregation in {:?}", start_local.elapsed());
 
-    let mut tree = TileTree::default();
-    for content in tile_contents {
-        tree.add_content(content);
-    }
-    let tileset = cesiumtiles::tileset::Tileset {
-        asset: cesiumtiles::tileset::Asset {
-            version: "1.1".to_string(),
+        log::info!("start exporting octree nodes (GLB)...");
+        let start_local = std::time::Instant::now();
+
+        let octree_contents = export_octree_nodes_to_glb(
+            tmp_tiled_file_dir_path.path(),
+            output_path,
+            &root_bbox,
+            min_depth,
+            max_depth,
+            args.quantize,
+            args.gzip_compress,
+        )?;
+
+        log::info!("Finish exporting octree nodes in {:?}", start_local.elapsed());
+
+        drop(tmp_tiled_file_dir_path);
+
+        let mut tree = OctreeTree::new(root_bbox);
+        for content in octree_contents {
+            tree.add_content(content);
+        }
+        let tileset = cesiumtiles::tileset::Tileset {
+            asset: cesiumtiles::tileset::Asset {
+                version: "1.1".to_string(),
+                ..Default::default()
+            },
+            root: tree.into_tileset_root(),
+            geometric_error: octree_geometric_error(&root_bbox),
             ..Default::default()
-        },
-        root: tree.into_tileset_root(),
-        geometric_error: 1e+100,
-        ..Default::default()
-    };
-    let root_tileset_path = output_path.join("tileset.json");
-    fs::create_dir_all(root_tileset_path.parent().unwrap())?;
-    fs::write(
-        root_tileset_path,
-        serde_json::to_string_pretty(&tileset).unwrap(),
-    )?;
+        };
+        let root_tileset_path = output_path.join("tileset.json");
+        fs::create_dir_all(root_tileset_path.parent().unwrap())?;
+        fs::write(
+            root_tileset_path,
+            serde_json::to_string_pretty(&tileset).unwrap(),
+        )?;
+    } else {
+        log::info!("Using geographic tiling mode");
+
+        let max_zoom = args.max;
+        let map_init = || HashMap::<u64, Vec<Point>>::new();
+        let map_fold = move |mut map: HashMap<u64, Vec<Point>>, p: &Point| {
+            let (z, x, y) = tiling::scheme::zxy_from_lng_lat(max_zoom, p.x, p.y);
+            let tile_id = TileIdMethod::Hilbert.zxy_to_id(z, x, y);
+            map.entry(tile_id).or_default().push(p.clone());
+            map
+        };
+        let map_reduce = |mut a: HashMap<u64, Vec<Point>>, b: HashMap<u64, Vec<Point>>| {
+            for (k, mut v) in b {
+                a.entry(k).or_default().append(&mut v);
+            }
+            a
+        };
+
+        let tile_map = transformed_points
+            .par_iter()
+            .fold(map_init, map_fold)
+            .reduce(map_init, map_reduce);
+
+        log::info!(
+            "Transformed & grouped into {} tiles in {:?}",
+            tile_map.len(),
+            start_local.elapsed()
+        );
+
+        let tmp_tiled_file_dir_path = tempdir().unwrap();
+
+        log::info!("start writing tile files...");
+        let start_local = std::time::Instant::now();
+        tile_map
+            .into_par_iter()
+            .try_for_each(|(tile_id, points)| -> std::io::Result<()> {
+                let (z, x, y) = TileIdMethod::Hilbert.id_to_zxy(tile_id);
+
+                let tile_path = tmp_tiled_file_dir_path
+                    .path()
+                    .join(format!("{}/{}/{}.bin", z, x, y));
+                fs::create_dir_all(tile_path.parent().unwrap())?;
+                let file = File::create(tile_path)?;
+                let mut writer = BufWriter::new(file);
+                let encoded = bitcode::encode(&points);
+                writer.write_all(&encoded)?;
+                Ok(())
+            })?;
+
+        log::info!("Wrote tile files in {:?}", start_local.elapsed());
+
+        log::info!("start zoom aggregation...");
+        let start_local = std::time::Instant::now();
+        for z in (args.min..max_zoom).rev() {
+            log::info!("aggregating zoom level: {}", z);
+            aggregate_zoom_level(tmp_tiled_file_dir_path.path(), z)?;
+        }
+        log::info!("Finish zoom aggregation in {:?}", start_local.elapsed());
+
+        log::info!("start exporting tiles (GLB)...");
+        let start_local = std::time::Instant::now();
+
+        let tile_contents = export_tiles_to_glb(
+            tmp_tiled_file_dir_path.path(),
+            output_path,
+            args.min,
+            max_zoom,
+            args.quantize,
+            args.gzip_compress,
+        )?;
+
+        log::info!("Finish exporting tiles in {:?}", start_local.elapsed());
+
+        drop(tmp_tiled_file_dir_path);
+
+        let mut tree = TileTree::default();
+        for content in tile_contents {
+            tree.add_content(content);
+        }
+        let tileset = cesiumtiles::tileset::Tileset {
+            asset: cesiumtiles::tileset::Asset {
+                version: "1.1".to_string(),
+                ..Default::default()
+            },
+            root: tree.into_tileset_root(),
+            geometric_error: 1e+100,
+            ..Default::default()
+        };
+        let root_tileset_path = output_path.join("tileset.json");
+        fs::create_dir_all(root_tileset_path.parent().unwrap())?;
+        fs::write(
+            root_tileset_path,
+            serde_json::to_string_pretty(&tileset).unwrap(),
+        )?;
+    }
 
     Ok(())
 }
