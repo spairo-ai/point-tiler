@@ -36,6 +36,7 @@ After installing Rust, download this repository.
 - `max-memory-mb`: Specify the number of MB of memory available for conversion.
 - `quantize`: Perform quantization.
 - `--gzip-compress`: The output 3D Tiles are compressed using gzip. The file extension dose not change.
+- `--meshopt-compress`: Compress vertex buffers using meshoptimizer (EXT_meshopt_compression). Provides better compression ratios than gzip for 3D geometry data.
 - `--tiling-mode`: Choose the tiling scheme: `geographic` (default, 2D lat/lon grid) or `octree` (3D spatial partitioning).
 
 In the repository root, the following commands can be executed.
@@ -49,7 +50,7 @@ point_tiler --input app/examples/data/sample.las \
     --max 18 \
     --max-memory-mb 8192 \
     --quantize \
-    --gzip-compress
+    --meshopt-compress
 ```
 
 This tool has a unique concept called a `zoom level` which represents a planar area roughly the same size as 2D tiles such as raster tiles or Google Photorealistic 3D Tiles.
@@ -147,11 +148,11 @@ This tool now supports **200+ global coordinate systems** via PROJ integration! 
 
 ## Functions to be implemented
 
-- [ ] tiling using octree
+- [X] tiling using octree
 - [X] large-scale processing using streaming
 - [X] generation of gzip-compressed tiles
 - [ ] assignment of attributes using EXT_mesh_features
-- [ ] compression using meshopt
+- [X] compression using meshopt
 - [X] global coordinate system support via PROJ
 
 ## License

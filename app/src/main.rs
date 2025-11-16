@@ -23,7 +23,7 @@ use glob::glob;
 // };
 use itertools::Itertools as _;
 use log::LevelFilter;
-use pcd_exporter::gltf::generate_glb;
+use pcd_exporter::gltf::{generate_glb, generate_meshopt_glb};
 use pcd_parser::reader::csv::CsvPointReader;
 use pcd_parser::reader::las::LasPointReader;
 use pcd_parser::reader::PointReader;
@@ -40,7 +40,7 @@ use pcd_core::pointcloud::{
 use pcd_exporter::tiling;
 use pcd_exporter::{
     cesiumtiles::make_tile_content,
-    gltf::generate_quantized_glb,
+    gltf::{generate_quantized_glb, generate_quantized_meshopt_glb},
     tiling::{geometric_error, TileContent, TileTree, BoundingBox, OctreeNodeId, OctantIndex, OctreeContent, OctreeTree, get_node_bbox, octree_geometric_error},
 };
 use pcd_parser::parser::{get_extension, Extension};
@@ -80,6 +80,9 @@ struct Cli {
 
     #[arg(long)]
     gzip_compress: bool,
+
+    #[arg(long)]
+    meshopt_compress: bool,
 
     #[arg(long, default_value = "geographic")]
     tiling_mode: String,
@@ -359,6 +362,7 @@ fn export_tiles_to_glb(
     max_zoom: u8,
     quantize: bool,
     gzip_compress: bool,
+    meshopt_compress: bool,
 ) -> std::io::Result<Vec<TileContent>> {
     let mut all_tiles = Vec::new();
     for z in min_zoom..=max_zoom {
@@ -403,7 +407,13 @@ fn export_tiles_to_glb(
             let glb_path = output_path.join(&tile_content.content_path);
             fs::create_dir_all(glb_path.parent().unwrap()).unwrap();
 
-            let glb = if quantize {
+            let glb = if meshopt_compress {
+                if quantize {
+                    generate_quantized_meshopt_glb(decimated).unwrap()
+                } else {
+                    generate_meshopt_glb(decimated).unwrap()
+                }
+            } else if quantize {
                 generate_quantized_glb(decimated).unwrap()
             } else {
                 generate_glb(decimated).unwrap()
@@ -436,6 +446,7 @@ fn export_octree_nodes_to_glb(
     max_depth: u8,
     quantize: bool,
     gzip_compress: bool,
+    meshopt_compress: bool,
 ) -> std::io::Result<Vec<OctreeContent>> {
     let mut all_nodes = Vec::new();
     for depth in min_depth..=max_depth {
@@ -489,7 +500,13 @@ fn export_octree_nodes_to_glb(
             let glb_path = output_path.join(&content_path);
             fs::create_dir_all(glb_path.parent().unwrap()).unwrap();
 
-            let glb = if quantize {
+            let glb = if meshopt_compress {
+                if quantize {
+                    generate_quantized_meshopt_glb(decimated).unwrap()
+                } else {
+                    generate_meshopt_glb(decimated).unwrap()
+                }
+            } else if quantize {
                 generate_quantized_glb(decimated).unwrap()
             } else {
                 generate_glb(decimated).unwrap()
@@ -716,6 +733,7 @@ fn in_memory_workflow(
             max_depth,
             args.quantize,
             args.gzip_compress,
+            args.meshopt_compress,
         )?;
 
         log::info!("Finish exporting octree nodes in {:?}", start_local.elapsed());
@@ -810,6 +828,7 @@ fn in_memory_workflow(
             max_zoom,
             args.quantize,
             args.gzip_compress,
+            args.meshopt_compress,
         )?;
 
         log::info!("Finish exporting tiles in {:?}", start_local.elapsed());
@@ -1035,6 +1054,7 @@ fn external_sort_workflow(
             args.max,
             args.quantize,
             args.gzip_compress,
+            args.meshopt_compress,
         )
         .unwrap();
         log::info!("Finish exporting tiles in {:?}", start_local.elapsed());

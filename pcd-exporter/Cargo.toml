@@ -14,6 +14,7 @@ cesiumtiles = { git = "https://github.com/MIERUNE/cesiumtiles-rs.git" }
 tinymvt = "0.0.1"
 projection-transform = { path = "../projection-transform" }
 rayon = "1.10.0"
+meshopt = "0.3"
 
 [dev-dependencies]
 pcd-parser = { path = "../pcd-parser" }
