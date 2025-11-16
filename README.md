@@ -29,8 +29,8 @@ After installing Rust, download this repository.
 
 - `input`: Specify the `.las/.laz/.csv/.txt` file. Multiple files can be input separated by spaces.
 - `output`: Specify the output folder. Output `tileset.json` and glb.
-- `input-epsg`: Input the epsg code of the las file. All point clouds are recognized as being in the same coordinate system.(Currently, only the Japanese plane rectangular coordinate system is supported.)
-- `output-epsg`: Supports conversion to WGS84 Geographic 3D (EPSG:4979), which is the standard for Cesium, and JGD2011 Geographic 3D (EPSG:6697), which is frequently used in Japan.
+- `input-epsg`: Input the EPSG code of the input file. All point clouds are recognized as being in the same coordinate system. **Now supports 200+ global coordinate systems via PROJ integration!**
+- `output-epsg`: Supports conversion to any EPSG coordinate system via PROJ. Common targets include WGS84 Geographic 3D (EPSG:4979), UTM zones, State Plane systems, and regional coordinate systems worldwide.
 - `min`: Specify the minimum zoom level you want to output.
 - `max`: Specify the maximum zoom level you want to output.
 - `max-memory-mb`: Specify the number of MB of memory available for conversion.
@@ -74,6 +74,47 @@ For example, the following data is valid.
 -5599.992,-35129.327,3.431,505.000,1.000,1.000,1.000,0.000,1.000,0.000,0.00 0,0.000,0.000,-4.000,0.000,95.000,188552.547,18504.000,19789.000,21074.000
 ```
 
+## Supported Coordinate Systems
+
+This tool now supports **200+ global coordinate systems** via PROJ integration! Some commonly used systems include:
+
+### Universal Transverse Mercator (UTM)
+- All 60 UTM zones in both Northern (EPSG:32601-32660) and Southern (EPSG:32701-32760) hemispheres
+
+### North America
+- NAD83 State Plane systems (California, Texas, Florida, New York, Washington, etc.)
+- NAD83(2011) (EPSG:6318, EPSG:6319)
+- NAD27 (EPSG:4267)
+
+### Europe
+- ETRS89 (EPSG:4258, EPSG:4937) and ETRS89 UTM zones
+- UK OSGB36 British National Grid (EPSG:27700)
+- France RGF93 Lambert 93 (EPSG:2154)
+- Germany DHDN Gauss-Kruger zones
+- Switzerland CH1903+ / LV95 (EPSG:2056)
+- Netherlands Amersfoort / RD New (EPSG:28992)
+
+### Asia-Pacific
+- **Japan**: JGD2011, JGD2000, Tokyo Datum (all 19 plane rectangular zones)
+- China CGCS2000 (EPSG:4490, EPSG:4491)
+- South Korea Korea 2000 (EPSG:4737, EPSG:5186)
+- Australia GDA2020 MGA zones (EPSG:7846-7858)
+- New Zealand NZGD2000 / NZTM (EPSG:2193)
+- Singapore SVY21 (EPSG:3414)
+- Hong Kong HK1980 Grid (EPSG:2326)
+
+### South America
+- Brazil SIRGAS2000 (EPSG:4674) and UTM zones
+- Argentina POSGAR (EPSG:4694, EPSG:5340)
+
+### Africa
+- South Africa Hartebeesthoek94 (EPSG:4148) and LO zones
+
+### Polar Regions
+- Arctic/Antarctic Polar Stereographic projections
+
+**Note**: Japan-specific transformations (JGD2011 → WGS84) use an optimized implementation with embedded geoid models for superior accuracy and performance.
+
 ## Functions to be implemented
 
 - [ ] tiling using octree
@@ -81,7 +122,7 @@ For example, the following data is valid.
 - [X] generation of gzip-compressed tiles
 - [ ] assignment of attributes using EXT_mesh_features
 - [ ] compression using meshopt
-- [ ] increasing the number of supported coordinate systems
+- [X] global coordinate system support via PROJ
 
 ## License
 
