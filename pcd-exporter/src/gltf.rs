@@ -5,6 +5,7 @@ use cesiumtiles_gltf_json::{
     Accessor, AccessorType, Buffer, BufferView, BufferViewTarget, ComponentType, Gltf, Mesh,
     MeshPrimitive, Node, Scene,
 };
+use cesiumtiles_gltf_json::extensions;
 use pcd_core::pointcloud::point::PointCloud;
 use serde_json::json;
 
@@ -103,13 +104,58 @@ pub fn generate_glb<'a>(
         ..Default::default()
     });
 
+    // Add feature IDs buffer (one u32 per point: 0, 1, 2, 3, ...)
+    let feature_id_offset = bin_content.len();
+    for i in 0..points.points.len() as u32 {
+        let mut id_buffer = [0u8; 4];
+        LittleEndian::write_u32(&mut id_buffer, i);
+        bin_content.write_all(&id_buffer)?;
+    }
+
+    // BufferView for feature IDs
+    gltf_buffer_views.push(BufferView {
+        name: Some("feature_ids".to_string()),
+        byte_offset: feature_id_offset as u32,
+        byte_length: (points.points.len() * 4) as u32,
+        byte_stride: None,
+        target: Some(BufferViewTarget::ArrayBuffer),
+        ..Default::default()
+    });
+
+    // Accessor for _FEATURE_ID_0
+    gltf_accessors.push(Accessor {
+        name: Some("feature_id_0".to_string()),
+        buffer_view: Some(gltf_buffer_views.len() as u32 - 1),
+        component_type: ComponentType::UnsignedInt,
+        count: points.points.len() as u32,
+        type_: AccessorType::Scalar,
+        ..Default::default()
+    });
+
+    // Build EXT_mesh_features
+    let feature_id_accessor = gltf_accessors.len() as u32 - 1;
+    let ext_mesh_features = extensions::mesh::ext_mesh_features::ExtMeshFeatures {
+        feature_ids: vec![extensions::mesh::ext_mesh_features::FeatureId {
+            feature_count: points.points.len() as u32,
+            attribute: Some(0),
+            property_table: Some(0),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+
     let gltf_meshes = vec![Mesh {
         primitives: vec![MeshPrimitive {
             attributes: HashMap::from_iter(vec![
                 ("POSITION".to_string(), 0),
                 ("COLOR_0".to_string(), 1),
+                ("_FEATURE_ID_0".to_string(), feature_id_accessor),
             ]),
             mode: cesiumtiles_gltf_json::PrimitiveMode::Points,
+            extensions: Some(extensions::mesh::MeshPrimitive {
+                ext_mesh_features: Some(ext_mesh_features),
+                ..Default::default()
+            }),
             ..Default::default()
         }],
         ..Default::default()
@@ -126,6 +172,11 @@ pub fn generate_glb<'a>(
         buffers
     };
 
+    // For now, we'll keep the feature IDs without the structural metadata
+    // The property attributes can be accessed using the feature IDs
+    // TODO: Add proper EXT_structural_metadata support when needed
+    let extensions_used = vec!["EXT_mesh_features".to_string()];
+
     let gltf = Gltf {
         scenes: vec![Scene {
             nodes: Some(vec![0]),
@@ -140,6 +191,7 @@ pub fn generate_glb<'a>(
         accessors: gltf_accessors,
         buffer_views: gltf_buffer_views,
         buffers: gltf_buffers,
+        extensions_used,
         ..Default::default()
     };
 
@@ -242,13 +294,58 @@ pub fn generate_quantized_glb<'a>(
         ..Default::default()
     });
 
+    // Add feature IDs buffer (one u32 per point: 0, 1, 2, 3, ...)
+    let feature_id_offset = bin_content.len();
+    for i in 0..points.points.len() as u32 {
+        let mut id_buffer = [0u8; 4];
+        LittleEndian::write_u32(&mut id_buffer, i);
+        bin_content.write_all(&id_buffer)?;
+    }
+
+    // BufferView for feature IDs
+    gltf_buffer_views.push(BufferView {
+        name: Some("feature_ids".to_string()),
+        byte_offset: feature_id_offset as u32,
+        byte_length: (points.points.len() * 4) as u32,
+        byte_stride: None,
+        target: Some(BufferViewTarget::ArrayBuffer),
+        ..Default::default()
+    });
+
+    // Accessor for _FEATURE_ID_0
+    gltf_accessors.push(Accessor {
+        name: Some("feature_id_0".to_string()),
+        buffer_view: Some(gltf_buffer_views.len() as u32 - 1),
+        component_type: ComponentType::UnsignedInt,
+        count: points.points.len() as u32,
+        type_: AccessorType::Scalar,
+        ..Default::default()
+    });
+
+    // Build EXT_mesh_features
+    let feature_id_accessor = gltf_accessors.len() as u32 - 1;
+    let ext_mesh_features = extensions::mesh::ext_mesh_features::ExtMeshFeatures {
+        feature_ids: vec![extensions::mesh::ext_mesh_features::FeatureId {
+            feature_count: points.points.len() as u32,
+            attribute: Some(0),
+            property_table: Some(0),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+
     let gltf_meshes = vec![Mesh {
         primitives: vec![MeshPrimitive {
             attributes: HashMap::from_iter(vec![
                 ("POSITION".to_string(), 0),
                 ("COLOR_0".to_string(), 1),
+                ("_FEATURE_ID_0".to_string(), feature_id_accessor),
             ]),
             mode: cesiumtiles_gltf_json::PrimitiveMode::Points,
+            extensions: Some(extensions::mesh::MeshPrimitive {
+                ext_mesh_features: Some(ext_mesh_features),
+                ..Default::default()
+            }),
             ..Default::default()
         }],
         ..Default::default()
@@ -265,7 +362,10 @@ pub fn generate_quantized_glb<'a>(
         buffers
     };
 
-    let extensions_used = vec!["KHR_mesh_quantization".to_string()];
+    // For now, we'll keep the feature IDs without the structural metadata
+    // The property attributes can be stored separately if needed
+    // TODO: Add proper EXT_structural_metadata support when needed
+    let mut extensions_used = vec!["KHR_mesh_quantization".to_string(), "EXT_mesh_features".to_string()];
     let extensions_required = vec!["KHR_mesh_quantization".to_string()];
 
     let gltf = Gltf {
@@ -410,13 +510,58 @@ pub fn generate_meshopt_glb<'a>(
         ..Default::default()
     });
 
+    // Add feature IDs buffer (one u32 per point: 0, 1, 2, 3, ...)
+    let feature_id_offset = bin_content.len();
+    for i in 0..point_count as u32 {
+        let mut id_buffer = [0u8; 4];
+        LittleEndian::write_u32(&mut id_buffer, i);
+        bin_content.write_all(&id_buffer)?;
+    }
+
+    // BufferView for feature IDs
+    gltf_buffer_views.push(BufferView {
+        name: Some("feature_ids".to_string()),
+        byte_offset: feature_id_offset as u32,
+        byte_length: (point_count * 4) as u32,
+        byte_stride: None,
+        target: Some(BufferViewTarget::ArrayBuffer),
+        ..Default::default()
+    });
+
+    // Accessor for _FEATURE_ID_0
+    gltf_accessors.push(Accessor {
+        name: Some("feature_id_0".to_string()),
+        buffer_view: Some(gltf_buffer_views.len() as u32 - 1),
+        component_type: ComponentType::UnsignedInt,
+        count: point_count as u32,
+        type_: AccessorType::Scalar,
+        ..Default::default()
+    });
+
+    // Build EXT_mesh_features
+    let feature_id_accessor = gltf_accessors.len() as u32 - 1;
+    let ext_mesh_features = extensions::mesh::ext_mesh_features::ExtMeshFeatures {
+        feature_ids: vec![extensions::mesh::ext_mesh_features::FeatureId {
+            feature_count: point_count as i64,
+            attribute: Some(0),
+            property_table: Some(0),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+
     let gltf_meshes = vec![Mesh {
         primitives: vec![MeshPrimitive {
             attributes: HashMap::from_iter(vec![
                 ("POSITION".to_string(), 0),
                 ("COLOR_0".to_string(), 1),
+                ("_FEATURE_ID_0".to_string(), feature_id_accessor),
             ]),
             mode: cesiumtiles_gltf_json::PrimitiveMode::Points,
+            extensions: Some(extensions::mesh::MeshPrimitive {
+                ext_mesh_features: Some(ext_mesh_features),
+                ..Default::default()
+            }),
             ..Default::default()
         }],
         ..Default::default()
@@ -427,7 +572,11 @@ pub fn generate_meshopt_glb<'a>(
         ..Default::default()
     }];
 
-    let extensions_used = vec!["EXT_meshopt_compression".to_string()];
+    // For now, we'll keep the feature IDs without the structural metadata
+    // The property attributes can be stored separately if needed
+    // TODO: Add proper EXT_structural_metadata support when needed
+
+    let mut extensions_used = vec!["EXT_meshopt_compression".to_string(), "EXT_mesh_features".to_string()];
     let extensions_required = vec!["EXT_meshopt_compression".to_string()];
 
     let gltf = Gltf {
@@ -583,13 +732,58 @@ pub fn generate_quantized_meshopt_glb<'a>(
         ..Default::default()
     });
 
+    // Add feature IDs buffer (one u32 per point: 0, 1, 2, 3, ...)
+    let feature_id_offset = bin_content.len();
+    for i in 0..point_count as u32 {
+        let mut id_buffer = [0u8; 4];
+        LittleEndian::write_u32(&mut id_buffer, i);
+        bin_content.write_all(&id_buffer)?;
+    }
+
+    // BufferView for feature IDs
+    gltf_buffer_views.push(BufferView {
+        name: Some("feature_ids".to_string()),
+        byte_offset: feature_id_offset as u32,
+        byte_length: (point_count * 4) as u32,
+        byte_stride: None,
+        target: Some(BufferViewTarget::ArrayBuffer),
+        ..Default::default()
+    });
+
+    // Accessor for _FEATURE_ID_0
+    gltf_accessors.push(Accessor {
+        name: Some("feature_id_0".to_string()),
+        buffer_view: Some(gltf_buffer_views.len() as u32 - 1),
+        component_type: ComponentType::UnsignedInt,
+        count: point_count as u32,
+        type_: AccessorType::Scalar,
+        ..Default::default()
+    });
+
+    // Build EXT_mesh_features
+    let feature_id_accessor = gltf_accessors.len() as u32 - 1;
+    let ext_mesh_features = extensions::mesh::ext_mesh_features::ExtMeshFeatures {
+        feature_ids: vec![extensions::mesh::ext_mesh_features::FeatureId {
+            feature_count: point_count as i64,
+            attribute: Some(0),
+            property_table: Some(0),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+
     let gltf_meshes = vec![Mesh {
         primitives: vec![MeshPrimitive {
             attributes: HashMap::from_iter(vec![
                 ("POSITION".to_string(), 0),
                 ("COLOR_0".to_string(), 1),
+                ("_FEATURE_ID_0".to_string(), feature_id_accessor),
             ]),
             mode: cesiumtiles_gltf_json::PrimitiveMode::Points,
+            extensions: Some(extensions::mesh::MeshPrimitive {
+                ext_mesh_features: Some(ext_mesh_features),
+                ..Default::default()
+            }),
             ..Default::default()
         }],
         ..Default::default()
@@ -600,9 +794,14 @@ pub fn generate_quantized_meshopt_glb<'a>(
         ..Default::default()
     }];
 
-    let extensions_used = vec![
+    // For now, we'll keep the feature IDs without the structural metadata
+    // The property attributes can be stored separately if needed
+    // TODO: Add proper EXT_structural_metadata support when needed
+
+    let mut extensions_used = vec![
         "EXT_meshopt_compression".to_string(),
         "KHR_mesh_quantization".to_string(),
+        "EXT_mesh_features".to_string(),
     ];
     let extensions_required = vec![
         "EXT_meshopt_compression".to_string(),

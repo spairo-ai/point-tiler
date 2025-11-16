@@ -151,7 +151,7 @@ This tool now supports **200+ global coordinate systems** via PROJ integration! 
 - [X] tiling using octree
 - [X] large-scale processing using streaming
 - [X] generation of gzip-compressed tiles
-- [ ] assignment of attributes using EXT_mesh_features
+- [X] assignment of attributes using EXT_mesh_features
 - [X] compression using meshopt
 - [X] global coordinate system support via PROJ
 
